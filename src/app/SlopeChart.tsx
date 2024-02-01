@@ -138,11 +138,13 @@ const Chart: React.FC<{ path: [number, number][]; ratio: number }> = ({
         top: "5%",
         containLabel: true,
       },
+
       tooltip: {
-        trigger: "axis",
+        trigger: "item",
         formatter: (params: any) => {
-          const value = params[0].value;
-          return value;
+          const value = params.dataIndex as number;
+          console.log(params);
+          return `Audio A: ${formatSeconds(value / ratio)}`;
         },
       },
     });

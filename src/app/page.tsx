@@ -79,7 +79,14 @@ export default function Home() {
   const hopSize = Math.pow(2, 15); // 32768 ~0.75s
   // const hopSize = Math.pow(2, 16); // 65536 ~1.5s
 
-  async function extractFeatures(audio: AudioBuffer) {
+  async function extractFeatures(audio: AudioBuffer, key?: string) {
+    if (key) {
+      const cached = localStorage.getItem(key);
+      if (cached) {
+        return JSON.parse(cached) as number[][];
+      }
+    }
+
     const semples = audio.getChannelData(0);
     // .slice(hopSize * 0, hopSize * chunkNum);
 
@@ -95,14 +102,33 @@ export default function Home() {
       const mfcc = Meyda.extract("mfcc", chunk) as number[];
       // prevChunk = chunk;
       if (!mfcc) continue;
-      // const reduced = (mfcc as number[]).reduce((a, b) => a + b, 0);
       console.log(i, mfcc);
       mfcc && features.push(mfcc);
+    }
+
+    if (key) {
+      localStorage.setItem(key, JSON.stringify(features));
     }
     return features;
   }
 
   const [path, setPath] = useState<[number, number][]>([]);
+
+  const pathAMap = useMemo(() => {
+    const map = new Map<number, number>();
+    path.forEach((n) => {
+      map.set(n[0], n[1]);
+    });
+    return map;
+  }, [path]);
+
+  const pathBMap = useMemo(() => {
+    const map = new Map<number, number>();
+    path.forEach((n) => {
+      map.set(n[1], n[0]);
+    });
+    return map;
+  }, [path]);
 
   const handleClick: MouseEventHandler<HTMLButtonElement> = async () => {
     const start = Date.now();
@@ -122,8 +148,8 @@ export default function Home() {
     console.log("start processing");
 
     const [mfcc_1, mfcc_2] = await Promise.all([
-      extractFeatures(audio_0.audioBuffer),
-      extractFeatures(audio_1.audioBuffer),
+      extractFeatures(audio_0.audioBuffer, "a"),
+      extractFeatures(audio_1.audioBuffer, "b"),
     ]);
 
     console.log(mfcc_1, mfcc_2);
@@ -149,15 +175,18 @@ export default function Home() {
   const ratio = sempleRate / hopSize;
 
   const syncTime = (time: number, reverse?: boolean) => {
-    const index = Math.floor(time * ratio);
+    const indexFloor = Math.floor(time * ratio);
+    const indexCeil = Math.ceil(time * ratio);
 
-    const distHop = reverse
-      ? path.find((n) => {
-          return n[1] === index;
-        })?.[0]
-      : path.find((n) => {
-          return n[0] === index;
-        })?.[1];
+    const distHopFloor = reverse
+      ? pathBMap.get(indexFloor)!
+      : pathAMap.get(indexFloor)!;
+    const distHopCeil = reverse
+      ? pathBMap.get(indexCeil)!
+      : pathAMap.get(indexCeil)!;
+
+    const distHop =
+      distHopFloor + (distHopCeil - distHopFloor) * (time * ratio - indexFloor);
 
     if (distHop === undefined) return time;
 

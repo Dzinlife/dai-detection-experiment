@@ -41,17 +41,15 @@ const Chart: React.FC<{ path: [number, number][]; ratio: number }> = ({
     chart.setOption({
       xAxis: {
         name: "Audio A",
-
-        // axisPointer: true,
       },
       yAxis: {
         name: "Audio B",
-        // axisPointer: true,
       },
       series: [
         {
           data: path,
           type: "line",
+          showSymbol: false,
         },
       ],
       grid: {
