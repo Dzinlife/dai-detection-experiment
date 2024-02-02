@@ -75,11 +75,12 @@ export default function Home() {
 
   const chunkNum = 600;
 
-  // const hopSize = Math.pow(2, 14); // 16384 ~0.37s
-  const hopSize = Math.pow(2, 15); // 32768 ~0.75s
-  // const hopSize = Math.pow(2, 16); // 65536 ~1.5s
+  const windowSize = Math.pow(2, 15); // 32768 ~0.75s
 
-  async function extractFeatures(audio: AudioBuffer, key?: string) {
+  async function extractFeatures(
+    audio: NonNullable<typeof audio_0>,
+    key?: string
+  ) {
     if (key) {
       const cached = localStorage.getItem(key);
       if (cached) {
@@ -87,24 +88,81 @@ export default function Home() {
       }
     }
 
-    const semples = audio.getChannelData(0);
+    const { audioBuffer, audioContext } = audio;
+
+    const semples = audioBuffer.getChannelData(0);
     // .slice(hopSize * 0, hopSize * chunkNum);
 
-    const chuckLength = Math.floor(semples.length / hopSize);
+    const resempleScale = 2;
+
+    const reducedData = new Float32Array(semples.length / resempleScale);
+    for (let i = 0; i < reducedData.length; i++) {
+      reducedData[i] = semples[i * resempleScale];
+    }
+
+    const reducedWindow = windowSize / resempleScale;
+
+    const chuckLength = Math.floor(reducedData.length / reducedWindow);
 
     console.log("total chucks num", chuckLength);
 
-    let prevChunk: Float32Array | undefined;
+    const features: number[][] = await new Promise((resolve) => {
+      const results: number[][] = [];
 
-    const features: number[][] = [];
-    for (let i = 0; i < chuckLength; i++) {
-      const chunk = semples.slice(i * hopSize, (i + 1) * hopSize);
-      const mfcc = Meyda.extract("mfcc", chunk) as number[];
-      // prevChunk = chunk;
-      if (!mfcc) continue;
-      console.log(i, mfcc);
-      mfcc && features.push(mfcc);
-    }
+      let currentTick = 0;
+      let lastBreakTime = performance.now();
+      const tick = (i: number) => {
+        if (results.length === chuckLength) {
+          resolve(results);
+          return;
+        }
+
+        const chunk = reducedData.slice(
+          i * reducedWindow,
+          (i + 1) * reducedWindow
+        );
+
+        const feature = Meyda.extract("chroma", chunk) as number[];
+
+        console.log(key, i);
+        results.push(feature);
+        const tickEnd = performance.now();
+
+        if (tickEnd - lastBreakTime > 100) {
+          lastBreakTime = tickEnd;
+          setTimeout(() => {
+            tick(++currentTick);
+          });
+        } else {
+          tick(++currentTick);
+        }
+      };
+
+      tick(0);
+    });
+
+    //   for (let i = 0; i < chuckLength; i++) {
+    //     const chunk = reducedData.slice(
+    //       i * reducedWindow,
+    //       (i + 1) * reducedWindow
+    //     );
+
+    //     // const feature = Meyda.extract("chroma", chunk) as number[];
+
+    //     const feature = await new Promise<number[]>((resolve) => {
+    //       setTimeout(() => {
+    //         const feature = Meyda.extract("chroma", chunk) as number[];
+    //         resolve(feature);
+    //       });
+
+    //       const timer = setInterval(() => {
+    //         clearInterval(timer);
+    //       });
+    //     });
+
+    //     console.log(key, i);
+    //     feature && features.push(feature);
+    //   }
 
     if (key) {
       localStorage.setItem(key, JSON.stringify(features));
@@ -130,7 +188,7 @@ export default function Home() {
     return map;
   }, [path]);
 
-  const handleClick: MouseEventHandler<HTMLButtonElement> = async () => {
+  const handleClick = async (force?: boolean) => {
     const start = Date.now();
     // const file_1 = inputRef_1.current?.files?.[0];
     // if (!file_1) return;
@@ -140,7 +198,7 @@ export default function Home() {
     // if (!file_2) return;
     // const audio_2 = await preprocess(file_2);
 
-    if (!audio_0 || !audio_1) {
+    if (!force && (!audio_0 || !audio_1)) {
       alert("audio not ready");
       return;
     }
@@ -148,13 +206,16 @@ export default function Home() {
     console.log("start processing");
 
     const [mfcc_1, mfcc_2] = await Promise.all([
-      extractFeatures(audio_0.audioBuffer, "a"),
-      extractFeatures(audio_1.audioBuffer, "b"),
+      extractFeatures(audio_0!, "a"),
+      extractFeatures(audio_1!, "b"),
     ]);
 
     console.log(mfcc_1, mfcc_2);
 
     const dtw = new Dtw(mfcc_1, mfcc_2, (vec1, vec2) => {
+      if (typeof vec1 === "number") vec1 = [vec1];
+      if (typeof vec2 === "number") vec2 = [vec2];
+
       let sum = 0;
       for (let i = 0; i < vec1.length; i++) {
         sum += Math.pow(vec1[i] - vec2[i], 2);
@@ -168,11 +229,11 @@ export default function Home() {
     const end = Date.now();
 
     const time = end - start;
-    // alert("done, time: " + time / 1000 + "s");
+    alert("done, time: " + time / 1000 + "s");
   };
 
-  const sempleRate = audio_0?.audioContext.sampleRate!;
-  const ratio = sempleRate / hopSize;
+  const sempleRate = audio_0?.audioContext.sampleRate || 44100;
+  const ratio = sempleRate / windowSize;
 
   const syncTime = (time: number, reverse?: boolean) => {
     const indexFloor = Math.floor(time * ratio);
@@ -216,7 +277,7 @@ export default function Home() {
     source.buffer = buffer;
     source.connect(ctx.destination);
     if (isAudioPlaying) {
-      audioSourceRef.current?.stop(ctx.currentTime);
+      audioSourceRef.current?.stop();
       audioSourceRef.current?.disconnect();
     }
     source.start(0, time);
@@ -245,13 +306,13 @@ export default function Home() {
 
   useEffect(() => {
     if (isAudioPlaying) {
-      const baseTime = currentAudioRef.current?.audioContext.currentTime || 0;
+      if (!currentAudioRef.current) return;
+      const audioContext = currentAudioRef.current.audioContext;
+
+      const baseTime = audioContext.currentTime;
 
       const timer = setInterval(() => {
-        const audioTime =
-          (currentAudioRef.current?.audioContext.currentTime || 0) -
-          baseTime +
-          audioOffset;
+        const audioTime = audioContext.currentTime - baseTime + audioOffset;
 
         const time = track === 0 ? audioTime : syncTime(audioTime, true);
 
@@ -278,13 +339,19 @@ export default function Home() {
     }
   };
 
+  useEffect(() => {
+    if (localStorage.getItem("a") && localStorage.getItem("b")) {
+      handleClick(true);
+    }
+  }, [audio_0, audio_1]);
+
   return (
     <main className="flex min-h-screen flex-col items-center justify-between p-24 ">
       <div className="w-full">
         {/* <input type="file" ref={inputRef_1} />
         <input type="file" ref={inputRef_2} /> */}
 
-        <div className="flex space-x-4 sticky top-0 pt-4 bg-[rgba(0,0,0,0.5)] z-10">
+        <div className="flex space-x-4 sticky top-0 pt-4 bg-white z-10 text-black">
           <div>
             <div>DTW</div>
             <DtwChart path={path} ratio={ratio} />
@@ -312,9 +379,17 @@ export default function Home() {
             </div>
             <button
               className="border px-2 py-1 rounded-md"
-              onClick={handleClick}
+              onClick={(e) => handleClick()}
             >
               Process
+            </button>
+            <button
+              className="border px-2 py-1 rounded-md"
+              onClick={() => {
+                localStorage.clear();
+              }}
+            >
+              Clean Cache
             </button>
             {isAudioPlaying && (
               <button

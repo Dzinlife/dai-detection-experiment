@@ -76,44 +76,43 @@ const Chart: React.FC<{ path: [number, number][]; ratio: number }> = ({
       return results;
     };
 
-    const filterData2 = (data: number[], windowSize: number) => {
+    const filterData2 = (
+      data: number[],
+      continueSize: number,
+      gapSize: number
+    ) => {
       let fill = true;
 
-      let continuous_1 = 0;
-      let continuous_0 = 0;
+      let continuous = 0;
+      let gap = 0;
       const results = data.slice();
 
       for (let i = 0; i < data.length; i++) {
         if (data[i] === 1) {
-          continuous_1++;
-          if (continuous_1 >= windowSize) {
+          continuous++;
+          if (continuous >= continueSize) {
             fill = true;
           }
 
-          if (fill && continuous_0 > 0) {
-            for (let j = i - 1; j >= i - continuous_0; j--) {
-              results[j] = 1;
-            }
-            fill = false;
-            continuous_1 = 0;
+          if (fill && gap <= gapSize) {
+            results.fill(1, i - gap, i);
           }
-          continuous_0 = 0;
+
+          gap = 0;
         } else {
-          continuous_0++;
-
-          if (continuous_0 > windowSize) {
+          gap++;
+          continuous = 0;
+          if (gap > gapSize) {
             fill = false;
           }
-
-          continuous_1 = 0;
         }
       }
 
       return results;
     };
 
-    let normalizedData = filterData(trackData, 44, 6);
-    normalizedData = filterData2(normalizedData, 20);
+    let normalizedData = filterData(trackData, 20, 2);
+    normalizedData = filterData2(normalizedData, 5, 50);
 
     console.log(normalizedData);
 
